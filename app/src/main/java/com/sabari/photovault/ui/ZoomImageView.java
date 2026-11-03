@@ -51,6 +51,13 @@ public class ZoomImageView extends ImageView {
                 }
                 return true;
             }
+            @Override public boolean onFling(MotionEvent e1, MotionEvent e2, float vx, float vy) {
+                // Only swipe to the next photo when not zoomed in.
+                if (zoom <= 1.01f && onSwipe != null && Math.abs(vx) > Math.abs(vy) && Math.abs(vx) > 700) {
+                    onSwipe.onSwipe(vx < 0 ? 1 : -1);
+                }
+                return true;
+            }
             @Override public boolean onSingleTapConfirmed(MotionEvent e) {
                 if (onSingleTap != null) onSingleTap.run();
                 return true;
@@ -59,6 +66,11 @@ public class ZoomImageView extends ImageView {
     }
 
     public void setOnSingleTap(Runnable r) { onSingleTap = r; }
+
+    /** direction: +1 = next photo (swiped left), -1 = previous photo (swiped right). */
+    public interface SwipeListener { void onSwipe(int direction); }
+    private SwipeListener onSwipe;
+    public void setOnSwipe(SwipeListener l) { onSwipe = l; }
 
     @Override
     public void setImageDrawable(Drawable d) {

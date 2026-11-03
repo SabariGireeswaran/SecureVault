@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="VaultTheme" parent="android:Theme.Material">
+    <style name="VaultTheme" parent="android:Theme.Material.NoActionBar">
         <item name="android:colorPrimary">@color/surface</item>
         <item name="android:colorPrimaryDark">@color/bg</item>
         <item name="android:colorAccent">@color/accent</item>

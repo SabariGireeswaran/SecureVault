@@ -18,6 +18,10 @@ public final class Session {
         @Override protected int sizeOf(String k, Bitmap b) { return b.getByteCount(); }
     };
 
+    /** Decrypted photo details (name, album...), RAM only. Cleared on lock. */
+    public static final java.util.concurrent.ConcurrentHashMap<String, org.json.JSONObject> META =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
     private Session() {}
 
     public static void unlock(SecretKey key) { masterKey = key; }
@@ -33,5 +37,6 @@ public final class Session {
     public static void lock() {
         masterKey = null;
         THUMBS.evictAll();
+        META.clear();
     }
 }

@@ -3,10 +3,14 @@
 An **offline**, encrypted photo vault for Android, written in **Java** using only built-in Android APIs (no third-party libraries).
 
 ## Features
-- Unlock with **PIN + fingerprint**
+- **6 colour themes**: Aurora, Sunset, Ocean, Emerald, Rose Gold, Neon (gradient backgrounds)
+- Unlock with **PIN + fingerprint**, using a **built-in PIN keypad** (keyboard apps never see your PIN)
 - Hide photos from the gallery (optionally deletes the original after encrypting)
-- Grid view, full-screen viewer with pinch-zoom
-- Restore a photo back to the gallery, or delete it permanently
+- **Albums** with colourful filter chips (album names are encrypted too)
+- **Multi-select** (long-press): delete, move to album, or restore many photos at once
+- Full-screen viewer: **swipe** between photos, pinch/double-tap zoom, photo details
+- **Dashboard**: photo count, storage used, backup reminder
+- **Auto-erase** (optional): destroy the vault after 10 or 20 wrong PINs in a row
 - **Encrypted backup file** for pendrive / laptop, restorable on any phone
 
 ## How the security works
@@ -74,13 +78,20 @@ app/src/main/java/com/sabari/photovault/
 │   ├── VaultStore.java        # encrypted file storage, import, export
 │   ├── BitmapUtils.java       # decode in memory, thumbnails, EXIF rotation
 │   └── PhotoItem.java
+│   ├── AppSettings.java       # theme, last backup, auto-erase limit
+│   └── VaultWiper.java        # auto-erase: destroys keys + files
 └── ui/
-    ├── SecureActivity.java    # base class: FLAG_SECURE + lock check
-    ├── LockActivity.java      # create PIN / unlock
+    ├── SecureActivity.java    # base class: FLAG_SECURE + lock check + theme
+    ├── AppTheme.java          # the 6 colour themes
+    ├── Ui.java                # shared drawing helpers (gradients, dialogs)
+    ├── LockActivity.java      # custom PIN keypad: create / unlock
     ├── Fingerprint.java       # BiometricPrompt wrapper
-    ├── VaultActivity.java     # photo grid + settings menu
-    ├── ViewerActivity.java    # full-screen viewer
-    └── ZoomImageView.java     # pinch-zoom
+    ├── VaultActivity.java     # dashboard, album chips, grid, multi-select
+    ├── ViewerActivity.java    # swipe viewer + details
+    ├── SettingsActivity.java  # theme, security, backup, about
+    ├── BackupFlow.java        # backup/restore screens (shared)
+    ├── AlbumPicker.java       # "move to album" dialog
+    └── ZoomImageView.java     # pinch-zoom + swipe
 tools/
 └── SvbExtract.java            # open a backup on a laptop
 ```

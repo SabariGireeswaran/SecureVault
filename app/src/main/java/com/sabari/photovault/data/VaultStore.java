@@ -27,6 +27,8 @@ import java.security.GeneralSecurityException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 
 /**
  * Reads and writes encrypted photos.
@@ -35,7 +37,7 @@ import java.util.List;
  * For each photo 3 files, all encrypted with the master key:
  *   <id>.enc   the original photo (full quality, EXIF kept)
  *   <id>.thm   a small thumbnail for the grid
- *   <id>.meta  original file name, type, date
+ *   <id>.meta  JSON: original name, type, date, album   (album names are encrypted too)
  * AAD ("photo:"+id etc.) ties each file to its id, so files can't be swapped around.
  */
 public class VaultStore {
@@ -50,21 +52,33 @@ public class VaultStore {
         if (!dir.exists()) dir.mkdirs();
     }
 
+    /** All photos, newest first. Decrypts each small meta file once, then uses the RAM cache. */
     public List<PhotoItem> list() {
         List<PhotoItem> items = new ArrayList<>();
         File[] files = dir.listFiles((d, name) -> name.endsWith(".enc"));
         if (files != null) {
             for (File f : files) {
                 String id = f.getName().substring(0, f.getName().length() - 4);
-                items.add(new PhotoItem(id, f.lastModified()));
+                JSONObject m = loadMeta(id);
+                items.add(new PhotoItem(id, m.optLong("added", f.lastModified()),
+                        m.optString("album", ""), m.optString("name", "photo"), f.length()));
             }
         }
-        Collections.sort(items, (a, b) -> Long.compare(b.addedAt, a.addedAt)); // newest first
+        Collections.sort(items, (a, b) -> Long.compare(b.addedAt, a.addedAt));
         return items;
     }
 
-    /** Copies a picked photo into the vault, encrypted. Returns the new id. */
-    public String importPhoto(Uri uri) throws IOException, GeneralSecurityException {
+    /** Album name -> number of photos, sorted A-Z. */
+    public static Map<String, Integer> albums(List<PhotoItem> items) {
+        Map<String, Integer> m = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+        for (PhotoItem p : items) {
+            if (!p.album.isEmpty()) m.put(p.album, m.containsKey(p.album) ? m.get(p.album) + 1 : 1);
+        }
+        return m;
+    }
+
+    /** Copies a picked photo into the vault, encrypted. */
+    public String importPhoto(Uri uri, String album) throws IOException, GeneralSecurityException {
         ContentResolver cr = ctx.getContentResolver();
         InputStream in = cr.openInputStream(uri);
         if (in == null) throw new IOException("Cannot open photo");
@@ -77,17 +91,35 @@ public class VaultStore {
             meta.put("name", displayName(cr, uri));
             meta.put("mime", mime == null ? "image/jpeg" : mime);
             meta.put("added", System.currentTimeMillis());
+            meta.put("album", album == null ? "" : album);
         } catch (JSONException ignored) { }
 
         byte[] thumb = BitmapUtils.makeThumbnail(data, THUMB_SIZE);
         if (thumb == null) throw new IOException("Not a supported image");
 
-        CryptoManager.encryptToFile(Session.key(), meta.toString().getBytes(StandardCharsets.UTF_8),
-                "meta:" + id, new File(dir, id + ".meta"));
+        writeMeta(id, meta);
         CryptoManager.encryptToFile(Session.key(), thumb, "thumb:" + id, new File(dir, id + ".thm"));
         // .enc is written last: a photo only "exists" in the grid once all parts are saved.
         CryptoManager.encryptToFile(Session.key(), data, "photo:" + id, new File(dir, id + ".enc"));
         return id;
+    }
+
+    /** Moves a photo into an album ("" = remove from album). */
+    public void setAlbum(String id, String album) throws IOException, GeneralSecurityException {
+        JSONObject m;
+        try {
+            m = new JSONObject(loadMeta(id).toString());   // copy, so the cache only changes after saving
+            m.put("album", album == null ? "" : album.trim());
+        } catch (JSONException e) {
+            throw new IOException("Bad photo details");
+        }
+        writeMeta(id, m);
+    }
+
+    private void writeMeta(String id, JSONObject meta) throws IOException, GeneralSecurityException {
+        CryptoManager.encryptToFile(Session.key(), meta.toString().getBytes(StandardCharsets.UTF_8),
+                "meta:" + id, new File(dir, id + ".meta"));
+        Session.META.put(id, meta);
     }
 
     /** Tries to remove the original from the phone gallery. Returns false if Android refused. */
@@ -109,12 +141,20 @@ public class VaultStore {
     }
 
     public JSONObject loadMeta(String id) {
+        JSONObject cached = Session.META.get(id);
+        if (cached != null) return cached;
         try {
             byte[] b = CryptoManager.decryptFile(Session.key(), new File(dir, id + ".meta"), "meta:" + id);
-            return new JSONObject(new String(b, StandardCharsets.UTF_8));
+            JSONObject m = new JSONObject(new String(b, StandardCharsets.UTF_8));
+            Session.META.put(id, m);
+            return m;
         } catch (Exception e) {
             return new JSONObject();
         }
+    }
+
+    public long sizeOf(String id) {
+        return new File(dir, id + ".enc").length();
     }
 
     // ---------------- used by backup / restore ----------------
@@ -137,8 +177,9 @@ public class VaultStore {
         if (!isValidId(id)) id = CryptoManager.toHex(CryptoManager.randomBytes(16));
         byte[] thumb = BitmapUtils.makeThumbnail(data, THUMB_SIZE);
         if (thumb == null) throw new IOException("Not a supported image");
-        CryptoManager.encryptToFile(Session.key(), metaJson.getBytes(StandardCharsets.UTF_8),
-                "meta:" + id, new File(dir, id + ".meta"));
+        JSONObject meta;
+        try { meta = new JSONObject(metaJson); } catch (JSONException e) { meta = new JSONObject(); }
+        writeMeta(id, meta);
         CryptoManager.encryptToFile(Session.key(), thumb, "thumb:" + id, new File(dir, id + ".thm"));
         CryptoManager.encryptToFile(Session.key(), data, "photo:" + id, new File(dir, id + ".enc"));
     }
@@ -148,6 +189,7 @@ public class VaultStore {
         new File(dir, id + ".thm").delete();
         new File(dir, id + ".meta").delete();
         Session.THUMBS.remove(id);
+        Session.META.remove(id);
     }
 
     /** Puts a decrypted copy back into the normal gallery (Pictures/Restored). */

@@ -77,6 +77,15 @@ public final class KeyStoreHelper {
         } catch (GeneralSecurityException ignored) { }
     }
 
+    /** Used by auto-erase: destroys both hardware keys, so old vault data can never be decrypted. */
+    public static void deleteAllKeys() {
+        deleteBioKey();
+        try {
+            KeyStore ks = keyStore();
+            if (ks.containsAlias(DEVICE_ALIAS)) ks.deleteEntry(DEVICE_ALIAS);
+        } catch (GeneralSecurityException ignored) { }
+    }
+
     /** Cipher to give to the fingerprint prompt. Throws KeyPermanentlyInvalidatedException if fingerprints changed. */
     public static Cipher bioEncryptCipher() throws GeneralSecurityException {
         Cipher c = Cipher.getInstance(AES_GCM);

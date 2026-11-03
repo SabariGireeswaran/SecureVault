@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<menu xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:id="@+id/m_lock" android:title="Lock now" android:showAsAction="always" />
-    <item android:id="@+id/m_backup" android:title="Backup to file (pendrive, etc.)" android:showAsAction="never" />
-    <item android:id="@+id/m_restore" android:title="Restore from backup file" android:showAsAction="never" />
-    <item android:id="@+id/m_bio" android:title="Fingerprint unlock" android:checkable="true" android:showAsAction="never" />
-    <item android:id="@+id/m_pin" android:title="Change PIN" android:showAsAction="never" />
-    <item android:id="@+id/m_about" android:title="How my photos are protected" android:showAsAction="never" />
-</menu>
