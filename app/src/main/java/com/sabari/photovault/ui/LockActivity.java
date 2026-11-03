@@ -159,7 +159,13 @@ public class LockActivity extends SecureActivity {
         bioButton.setOnClickListener(v -> startBioUnlock());
         bioButton.setVisibility(View.INVISIBLE);
         col.addView(bioButton, lp(-2, -2, 14));
-        return col;
+
+        // On short phones the screen scrolls instead of squeezing things on top of each other.
+        android.widget.ScrollView scroll = new android.widget.ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.setVerticalScrollBarEnabled(false);
+        scroll.addView(col, new android.widget.FrameLayout.LayoutParams(-1, -2));
+        return scroll;
     }
 
     private LinearLayout buildKeypad() {
@@ -167,7 +173,15 @@ public class LockActivity extends SecureActivity {
         pad.setOrientation(LinearLayout.VERTICAL);
         String[][] rows = {{"1", "2", "3"}, {"4", "5", "6"}, {"7", "8", "9"}, {"<", "0", "OK"}};
         String[] letters = {"", "ABC", "DEF", "GHI", "JKL", "MNO", "PQRS", "TUV", "WXYZ"};
-        int size = Ui.dp(this, 70), gap = Ui.dp(this, 9);
+
+        // Key size is calculated from the SCREEN size, so the keypad fits every phone.
+        int screenW = getResources().getDisplayMetrics().widthPixels;
+        int screenH = getResources().getDisplayMetrics().heightPixels;
+        int gap = Ui.dp(this, 10);
+        int size = Math.min(Ui.dp(this, 76), (screenW - Ui.dp(this, 48)) / 3 - gap * 2);
+        size = Math.min(size, (int) (screenH * 0.46f) / 4 - gap);
+        // Text size comes from the KEY size (not the phone font setting), so numbers always stay inside the circle.
+        float digitPx = size * 0.40f, letterPx = size * 0.13f;
         for (String[] row : rows) {
             LinearLayout r = new LinearLayout(this);
             r.setGravity(Gravity.CENTER);
@@ -183,7 +197,8 @@ public class LockActivity extends SecureActivity {
                     ImageView ic = new ImageView(this);
                     ic.setImageResource(ok ? R.drawable.ic_check : R.drawable.ic_backspace);
                     ic.setImageTintList(ColorStateList.valueOf(ok ? 0xFF0B0B12 : t.text));
-                    key.addView(ic, new FrameLayout.LayoutParams(Ui.dp(this, 28), Ui.dp(this, 28), Gravity.CENTER));
+                    int is = (int) (size * 0.40f);
+                    key.addView(ic, new FrameLayout.LayoutParams(is, is, Gravity.CENTER));
                     key.setOnClickListener(v -> { haptic(v); if (ok) submit(); else backspace(); });
                     if (!ok) key.setOnLongClickListener(v -> { clearBuf(); updateDots(); return true; });
                 } else {
@@ -192,12 +207,22 @@ public class LockActivity extends SecureActivity {
                     key.setBackground(Ui.ripple(bg, Ui.alpha(t.accent, 0.45f)));
                     LinearLayout label = new LinearLayout(this);
                     label.setOrientation(LinearLayout.VERTICAL);
-                    label.setGravity(Gravity.CENTER);
-                    label.addView(Ui.text(this, k, 27, t.text, false));
-                    TextView sub = Ui.text(this, letters[k.charAt(0) == '0' ? 0 : k.charAt(0) - '1'], 9, t.muted, false);
-                    sub.setLetterSpacing(0.15f);
-                    if (!k.equals("0") && !k.equals("1")) label.addView(sub);
-                    key.addView(label, new FrameLayout.LayoutParams(-1, -1));
+                    label.setGravity(Gravity.CENTER_HORIZONTAL);
+                    TextView digit = Ui.text(this, k, 10, t.text, false);
+                    digit.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, digitPx);
+                    digit.setIncludeFontPadding(false);   // removes hidden space above/below, so it centres exactly
+                    digit.setGravity(Gravity.CENTER);
+                    label.addView(digit);
+                    if (!k.equals("0") && !k.equals("1")) {
+                        TextView sub = Ui.text(this, letters[k.charAt(0) - '1'], 10, t.muted, false);
+                        sub.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, letterPx);
+                        sub.setIncludeFontPadding(false);
+                        sub.setLetterSpacing(0.15f);
+                        sub.setPadding(0, Ui.dp(this, 2), 0, 0);
+                        label.addView(sub);
+                    }
+                    // Wrap-content + CENTER = the label block sits exactly in the middle of the circle.
+                    key.addView(label, new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER));
                     key.setOnClickListener(v -> { haptic(v); typeDigit(k.charAt(0)); });
                 }
                 r.addView(key);
@@ -230,7 +255,11 @@ public class LockActivity extends SecureActivity {
     private void updateDots() {
         dots.removeAllViews();
         int shown = Math.max(VaultKeys.MIN_PIN, len);
-        int s = Ui.dp(this, 14), m = Ui.dp(this, 7);
+        // Long PIN? Make the dots smaller so they always fit on one line.
+        int avail = getResources().getDisplayMetrics().widthPixels - Ui.dp(this, 64);
+        int per = avail / shown;
+        int s = Math.min(Ui.dp(this, 14), (int) (per * 0.6f));
+        int m = Math.min(Ui.dp(this, 7), (per - s) / 2);
         for (int i = 0; i < shown; i++) {
             View d = new View(this);
             if (i < len) d.setBackground(Ui.circle(t.accent, t.accent2));

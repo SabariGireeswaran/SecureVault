@@ -118,7 +118,8 @@ public class VaultActivity extends SecureActivity {
         TextView tag = Ui.text(this, "ENCRYPTED  ·  OFFLINE", 11, t.muted, true);
         tag.setLetterSpacing(0.12f);
         titles.addView(tag);
-        TextView title = Ui.text(this, "SecureVault", 28, t.text, true);
+        TextView title = Ui.text(this, "SecureVault", 26, t.text, true);
+        title.setMaxLines(1);
         Ui.gradientText(title, t.accent, t.accent2);
         titles.addView(title);
         normalBar.addView(titles, new LinearLayout.LayoutParams(0, -2, 1f));
@@ -131,7 +132,10 @@ public class VaultActivity extends SecureActivity {
         selBar.setPadding(Ui.dp(this, 6), 0, Ui.dp(this, 6), 0);
         selBar.setBackground(Ui.round(Ui.alpha(t.accent, 0.14f), Ui.dp(this, 20)));
         selBar.addView(Ui.iconButton(this, R.drawable.ic_close, t.text, v -> exitSelect()));
-        selCount = Ui.text(this, "", 18, t.text, true);
+        // Only the number is shown (e.g. "12"), so it never gets squeezed by the 5 buttons.
+        selCount = Ui.text(this, "", 20, t.text, true);
+        selCount.setMaxLines(1);
+        selCount.setEllipsize(android.text.TextUtils.TruncateAt.END);
         selBar.addView(selCount, new LinearLayout.LayoutParams(0, -2, 1f));
         selBar.addView(Ui.iconButton(this, R.drawable.ic_select_all, t.text, v -> selectAll()));
         selBar.addView(Ui.iconButton(this, R.drawable.ic_folder, t.accent2, v -> moveSelected()));
@@ -230,8 +234,17 @@ public class VaultActivity extends SecureActivity {
     private LinearLayout stat(TextView big, String label) {
         LinearLayout c = new LinearLayout(this);
         c.setOrientation(LinearLayout.VERTICAL);
-        c.addView(big);
-        c.addView(Ui.text(this, label, 12, Ui.alpha(DARK, 0.7f), false));
+        // Fixed height + auto-size: a long value like "1.25 GB" shrinks a little instead of breaking the card.
+        big.setMaxLines(1);
+        big.setIncludeFontPadding(false);
+        big.setGravity(Gravity.CENTER_VERTICAL);
+        big.setAutoSizeTextTypeUniformWithConfiguration(14, 30, 1, android.util.TypedValue.COMPLEX_UNIT_SP);
+        c.addView(big, new LinearLayout.LayoutParams(-1, Ui.dp(this, 38)));
+        TextView l = Ui.text(this, label, 12, Ui.alpha(DARK, 0.7f), false);
+        l.setMaxLines(1);
+        l.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        c.addView(l);
+        c.setPadding(0, 0, Ui.dp(this, 8), 0);
         return c;
     }
 
@@ -384,7 +397,8 @@ public class VaultActivity extends SecureActivity {
     }
 
     private void updateSelBar() {
-        selCount.setText(selected.size() + " selected");
+        selCount.setText(String.valueOf(selected.size()));
+        selCount.setContentDescription(selected.size() + " selected");
     }
 
     private void deleteSelected() {

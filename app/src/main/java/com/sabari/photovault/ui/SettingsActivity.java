@@ -136,7 +136,7 @@ public class SettingsActivity extends SecureActivity {
         LinearLayout ab = card();
         ab.addView(row(R.drawable.ic_info, 0xFFFFA94D, "How my photos are protected", "Simple explanation", null, v -> about()));
         ab.addView(divider());
-        ab.addView(row(R.drawable.ic_shield, 0xFF38D9A9, "SecureVault 1.2", "Offline · No internet permission · Open source", null, null));
+        ab.addView(row(R.drawable.ic_shield, 0xFF38D9A9, "SecureVault 1.2.1", "Offline · No internet permission · Open source", null, null));
         col.addView(ab);
         return page;
     }
@@ -279,6 +279,8 @@ public class SettingsActivity extends SecureActivity {
         TextView n = Ui.text(this, th.name, 10, active ? t.text : t.muted, active);
         n.setPadding(0, Ui.dp(this, 6), 0, 0);
         n.setSingleLine(true);
+        n.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        n.setGravity(Gravity.CENTER);
         c.addView(n);
         c.setOnClickListener(v -> {
             settings.setThemeIndex(i);

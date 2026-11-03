@@ -18,6 +18,23 @@ public abstract class SecureActivity extends Activity {
     protected AppTheme t;
     private int themeAtCreate;
 
+    /**
+     * Phones let users make all text bigger (Settings → Display → Font size).
+     * Very big text no longer fits inside round keys and cards, so we allow
+     * up to 15% bigger text, and no more. Everything stays readable and aligned.
+     */
+    private static final float MAX_FONT_SCALE = 1.15f;
+
+    @Override
+    protected void attachBaseContext(android.content.Context base) {
+        android.content.res.Configuration c = new android.content.res.Configuration(base.getResources().getConfiguration());
+        if (c.fontScale > MAX_FONT_SCALE) {
+            c.fontScale = MAX_FONT_SCALE;
+            base = base.createConfigurationContext(c);
+        }
+        super.attachBaseContext(base);
+    }
+
     /** Screens that need the vault to be open return true. */
     protected boolean requiresUnlock() { return true; }
 
