@@ -25,15 +25,20 @@ import android.widget.Toast;
 
 import com.sabari.photovault.R;
 import com.sabari.photovault.VaultApp;
+import com.sabari.photovault.backup.BackupFormat;
+import com.sabari.photovault.backup.BackupManager;
 import com.sabari.photovault.crypto.KeyStoreHelper;
 import com.sabari.photovault.crypto.Session;
 import com.sabari.photovault.crypto.VaultKeys;
 import com.sabari.photovault.data.PhotoItem;
 import com.sabari.photovault.data.VaultStore;
 
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -43,6 +48,11 @@ import javax.crypto.Cipher;
 public class VaultActivity extends SecureActivity {
 
     private static final int REQ_PICK = 42;
+    private static final int REQ_BACKUP = 43;
+    private static final int REQ_RESTORE = 44;
+
+    /** Backup password waiting while the user picks where to save the file. Wiped right after use. */
+    private char[] pendingPassword;
 
     private VaultStore store;
     private VaultKeys keys;
@@ -86,6 +96,7 @@ public class VaultActivity extends SecureActivity {
         super.onDestroy();
         thumbLoader.shutdownNow();
         worker.shutdownNow();
+        wipePending();
     }
 
     private void reload() {
@@ -118,6 +129,10 @@ public class VaultActivity extends SecureActivity {
         if (id == R.id.m_lock) {
             Session.lock();
             goToLock();
+        } else if (id == R.id.m_backup) {
+            backupPasswordDialog();
+        } else if (id == R.id.m_restore) {
+            pickBackupFile();
         } else if (id == R.id.m_bio) {
             toggleFingerprint();
         } else if (id == R.id.m_pin) {
@@ -143,6 +158,20 @@ public class VaultActivity extends SecureActivity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQ_BACKUP) {
+            if (resultCode == RESULT_OK && data != null && data.getData() != null && Session.isUnlocked()) {
+                runBackup(data.getData());
+            } else {
+                wipePending();
+            }
+            return;
+        }
+        if (requestCode == REQ_RESTORE) {
+            if (resultCode == RESULT_OK && data != null && data.getData() != null && Session.isUnlocked()) {
+                restorePasswordDialog(data.getData());
+            }
+            return;
+        }
         if (requestCode != REQ_PICK || resultCode != RESULT_OK || data == null) return;
         if (!Session.isUnlocked()) return;
 
@@ -197,6 +226,178 @@ public class VaultActivity extends SecureActivity {
                 new AlertDialog.Builder(this).setMessage(msg.toString()).setPositiveButton("OK", null).show();
             });
         });
+    }
+
+    // ------------------------------------------------------------------ backup & restore
+
+    private void backupPasswordDialog() {
+        if (items.isEmpty()) {
+            Toast.makeText(this, "The vault is empty — nothing to back up", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        LinearLayout box = dialogBox();
+        TextView info = new TextView(this);
+        info.setText("Choose a BACKUP PASSWORD. It protects the backup file on its own, "
+                + "even on another phone or laptop.\n\n"
+                + "• At least " + BackupFormat.MIN_PASSWORD + " characters, letters + numbers\n"
+                + "• Different from your PIN\n"
+                + "• Write it down and keep it somewhere safe.\n"
+                + "  Forget it = the backup can never be opened.");
+        info.setTextColor(Color.parseColor("#8B95A3"));
+        EditText p1 = passwordField("Backup password"), p2 = passwordField("Confirm backup password");
+        box.addView(info);
+        box.addView(p1);
+        box.addView(p2);
+
+        AlertDialog dlg = new AlertDialog.Builder(this)
+                .setTitle("Create encrypted backup")
+                .setView(box)
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Next", null)
+                .show();
+        // Custom click so the dialog stays open when the password is not good enough.
+        dlg.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            char[] a = toChars(p1), b = toChars(p2);
+            String problem = BackupFormat.passwordProblem(a);
+            if (problem == null && !Arrays.equals(a, b)) problem = "Passwords do not match";
+            Arrays.fill(b, '\0');
+            if (problem != null) {
+                Arrays.fill(a, '\0');
+                Toast.makeText(this, problem, Toast.LENGTH_LONG).show();
+                return;
+            }
+            dlg.dismiss();
+            wipePending();
+            pendingPassword = a;
+            chooseBackupLocation();
+        });
+    }
+
+    private void chooseBackupLocation() {
+        String date = new SimpleDateFormat("yyyy-MM-dd_HHmm", Locale.US).format(new Date());
+        Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        i.setType("application/octet-stream");
+        i.putExtra(Intent.EXTRA_TITLE, "SecureVault-backup_" + date + ".svb");
+        VaultApp.allowPicker();
+        startActivityForResult(i, REQ_BACKUP);
+    }
+
+    private void runBackup(Uri target) {
+        char[] password = pendingPassword;
+        pendingPassword = null;
+        if (password == null) return;
+        AlertDialog progress = new AlertDialog.Builder(this)
+                .setTitle("Creating backup…")
+                .setMessage("Preparing (this takes a few seconds)…")
+                .setCancelable(false)
+                .show();
+        worker.execute(() -> {
+            try {
+                int count = new BackupManager(this).backup(target, password,
+                        (done, total) -> main.post(() -> progress.setMessage(done + " of " + total + " photos")));
+                main.post(() -> {
+                    progress.dismiss();
+                    new AlertDialog.Builder(this)
+                            .setTitle("Backup complete")
+                            .setMessage(count + " photos saved into one encrypted file.\n\n"
+                                    + "Now copy this file to a pendrive or laptop. A backup that stays only "
+                                    + "on this phone won't help if the phone is lost.\n\n"
+                                    + "To restore: install this app on the new phone, create a PIN, "
+                                    + "then Menu → Restore from backup file.")
+                            .setPositiveButton("OK", null)
+                            .show();
+                });
+            } catch (Exception e) {
+                main.post(() -> {
+                    progress.dismiss();
+                    if (!Session.isUnlocked()) { goToLock(); return; }
+                    showMessage("Backup failed", "The backup could not be finished. Please try again.\n\n("
+                            + e.getMessage() + ")");
+                });
+            } finally {
+                Arrays.fill(password, '\0');
+            }
+        });
+    }
+
+    private void pickBackupFile() {
+        Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        i.setType("*/*");   // .svb files have no standard type, so show all files
+        VaultApp.allowPicker();
+        startActivityForResult(i, REQ_RESTORE);
+    }
+
+    private void restorePasswordDialog(Uri source) {
+        LinearLayout box = dialogBox();
+        EditText p = passwordField("Backup password");
+        box.addView(p);
+        new AlertDialog.Builder(this)
+                .setTitle("Restore from backup")
+                .setMessage("Enter the password you chose when the backup was created.")
+                .setView(box)
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Restore", (d, w) -> runRestore(source, toChars(p)))
+                .show();
+    }
+
+    private void runRestore(Uri source, char[] password) {
+        AlertDialog progress = new AlertDialog.Builder(this)
+                .setTitle("Restoring…")
+                .setMessage("Checking password…")
+                .setCancelable(false)
+                .show();
+        worker.execute(() -> {
+            try {
+                BackupManager.Result r = new BackupManager(this).restore(source, password,
+                        (done, total) -> main.post(() -> progress.setMessage(done + " photos processed")));
+                main.post(() -> {
+                    progress.dismiss();
+                    reload();
+                    StringBuilder m = new StringBuilder();
+                    m.append(r.restored).append(" photos restored.");
+                    if (r.skipped > 0) m.append("\n").append(r.skipped).append(" were already in the vault (skipped).");
+                    if (r.failed > 0) m.append("\n").append(r.failed).append(" could not be restored.");
+                    m.append("\n\nThe backup file was checked and is not damaged.");
+                    showMessage("Restore complete", m.toString());
+                });
+            } catch (BackupFormat.WrongPasswordException e) {
+                main.post(() -> { progress.dismiss(); showMessage("Wrong password", "That is not the password of this backup file."); });
+            } catch (Exception e) {
+                main.post(() -> {
+                    progress.dismiss();
+                    reload();
+                    if (!Session.isUnlocked()) { goToLock(); return; }
+                    showMessage("Restore stopped", e.getMessage() == null ? "This file could not be read." : e.getMessage());
+                });
+            } finally {
+                Arrays.fill(password, '\0');
+            }
+        });
+    }
+
+    private void wipePending() {
+        if (pendingPassword != null) { Arrays.fill(pendingPassword, '\0'); pendingPassword = null; }
+    }
+
+    private void showMessage(String title, String msg) {
+        new AlertDialog.Builder(this).setTitle(title).setMessage(msg).setPositiveButton("OK", null).show();
+    }
+
+    private LinearLayout dialogBox() {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        int pad = (int) (20 * getResources().getDisplayMetrics().density);
+        box.setPadding(pad, pad / 2, pad, 0);
+        return box;
+    }
+
+    private EditText passwordField(String hint) {
+        EditText e = new EditText(this);
+        e.setHint(hint);
+        e.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        return e;
     }
 
     // ------------------------------------------------------------------ settings
@@ -280,8 +481,12 @@ public class VaultActivity extends SecureActivity {
                         + "• The app has NO internet permission. It cannot send anything anywhere.\n\n"
                         + "• Screenshots, screen recording and the recent-apps preview are blocked.\n\n"
                         + "• The vault locks the moment you leave the app or turn off the screen.\n\n"
-                        + "• Backups are disabled, so photos never go to Google Drive.\n\n"
-                        + "⚠ Forgot the PIN = photos are gone forever. Uninstalling the app also deletes them.")
+                        + "• Google/cloud backup is disabled, so photos never go to Google Drive.\n\n"
+                        + "• Your own backup: Menu → Backup to file. It creates one encrypted .svb file "
+                        + "that you can keep on a pendrive. It opens on any phone with this app (or on a laptop) "
+                        + "with your backup password.\n\n"
+                        + "⚠ Lost PIN, lost phone or uninstalled app = photos gone, UNLESS you have a "
+                        + "backup file and its password.")
                 .setPositiveButton("OK", null)
                 .show();
     }

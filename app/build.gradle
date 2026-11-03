@@ -14,8 +14,8 @@ android {
         applicationId 'com.sabari.photovault'
         minSdk 30          // Android 11+ (needed for modern fingerprint + Keystore APIs)
         targetSdk 34
-        versionCode 1
-        versionName '1.0'
+        versionCode 2
+        versionName '1.1'
     }
 
     signingConfigs {

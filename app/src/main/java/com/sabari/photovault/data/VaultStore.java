@@ -117,6 +117,32 @@ public class VaultStore {
         }
     }
 
+    // ---------------- used by backup / restore ----------------
+
+    public boolean exists(String id) {
+        return new File(dir, id + ".enc").exists();
+    }
+
+    public String loadMetaJson(String id) {
+        return loadMeta(id).toString();
+    }
+
+    /** Only 32 hex characters are allowed as an id (blocks tricks like "../" in a fake backup). */
+    public static boolean isValidId(String id) {
+        return id != null && id.matches("[0-9a-f]{32}");
+    }
+
+    /** Saves a photo coming from a backup file, encrypting it with THIS phone's master key. */
+    public void saveRestored(String id, String metaJson, byte[] data) throws IOException, GeneralSecurityException {
+        if (!isValidId(id)) id = CryptoManager.toHex(CryptoManager.randomBytes(16));
+        byte[] thumb = BitmapUtils.makeThumbnail(data, THUMB_SIZE);
+        if (thumb == null) throw new IOException("Not a supported image");
+        CryptoManager.encryptToFile(Session.key(), metaJson.getBytes(StandardCharsets.UTF_8),
+                "meta:" + id, new File(dir, id + ".meta"));
+        CryptoManager.encryptToFile(Session.key(), thumb, "thumb:" + id, new File(dir, id + ".thm"));
+        CryptoManager.encryptToFile(Session.key(), data, "photo:" + id, new File(dir, id + ".enc"));
+    }
+
     public void delete(String id) {
         new File(dir, id + ".enc").delete();
         new File(dir, id + ".thm").delete();

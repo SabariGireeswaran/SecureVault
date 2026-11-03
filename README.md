@@ -7,6 +7,7 @@ An **offline**, encrypted photo vault for Android, written in **Java** using onl
 - Hide photos from the gallery (optionally deletes the original after encrypting)
 - Grid view, full-screen viewer with pinch-zoom
 - Restore a photo back to the gallery, or delete it permanently
+- **Encrypted backup file** for pendrive / laptop, restorable on any phone
 
 ## How the security works
 
@@ -30,12 +31,40 @@ MASTER KEY copy B  ──▶ hardware BIOMETRIC key (needs a fresh fingerprint f
 ```
 The PIN is **never stored**. A wrong PIN simply fails to decrypt.
 
-⚠️ **There is no "forgot PIN".** Forget it and the photos are gone forever. Uninstalling the app also deletes them.
+⚠️ **There is no "forgot PIN".** Lost PIN, lost phone or uninstalled app = photos gone, **unless you have an encrypted backup file** (see below).
+
+## Encrypted backup (`.svb` file)
+
+Menu → **Backup to file** creates one encrypted file you can save anywhere Android lets you pick: Downloads, SD card, or a **pendrive via USB OTG**. Copy it to a pendrive or laptop.
+
+- Protected by a separate **backup password** (10+ characters, letters + numbers), not by the phone, so it opens on **any** device.
+- AES-256-GCM, key from PBKDF2-HMAC-SHA256 (310,000 rounds).
+- Every record is bound to its position (AAD), and an END record stores the photo count. So changed, reordered, removed or cut-off data is detected.
+
+**Restore on a new phone:** install the app → create a PIN → Menu → **Restore from backup file** → enter the backup password. Photos already in the vault are skipped, so restoring twice is safe.
+
+**Open on a laptop (Ubuntu), without the app:**
+```bash
+javac -d /tmp/svb tools/SvbExtract.java app/src/main/java/com/sabari/photovault/backup/BackupFormat.java
+java -cp /tmp/svb SvbExtract ~/SecureVault-backup.svb ~/RestoredPhotos
+```
+The laptop tool uses the exact same `BackupFormat.java` as the app. Extracted photos are **not** encrypted, so delete them when done.
+
+### `.svb` file layout
+```
+HEADER : "SVB1" | PBKDF2 iterations (int) | salt (16 bytes)
+RECORD : length (int) | IV (12) | AES-GCM( type | id | meta JSON | photo bytes )   AAD = header + record number
+...
+END    : AES-GCM( type=END | photo count )
+```
 
 ## Project structure
 ```
 app/src/main/java/com/sabari/photovault/
 ├── VaultApp.java              # auto-lock when the app leaves the screen
+├── backup/
+│   ├── BackupFormat.java      # .svb file format (pure Java, also used by the laptop tool)
+│   └── BackupManager.java     # backup / restore the vault
 ├── crypto/
 │   ├── CryptoManager.java     # AES-256-GCM, PBKDF2
 │   ├── KeyStoreHelper.java    # hardware keys (device + fingerprint)
@@ -52,6 +81,8 @@ app/src/main/java/com/sabari/photovault/
     ├── VaultActivity.java     # photo grid + settings menu
     ├── ViewerActivity.java    # full-screen viewer
     └── ZoomImageView.java     # pinch-zoom
+tools/
+└── SvbExtract.java            # open a backup on a laptop
 ```
 
 ## Build (Ubuntu)
