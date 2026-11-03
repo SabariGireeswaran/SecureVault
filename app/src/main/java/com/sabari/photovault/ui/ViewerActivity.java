@@ -48,6 +48,18 @@ public class ViewerActivity extends SecureActivity {
     private Bitmap bitmap;
     private int origW, origH;
     private int loadToken = 0;
+    private ImageView favIcon, playIcon;
+    private boolean playing = false;
+    private static final long SLIDE_MS = 3000;
+
+    /** Slideshow: next photo every 3 seconds, starting again after the last one. */
+    private final Runnable slide = new Runnable() {
+        @Override public void run() {
+            if (!playing) return;
+            show(index >= ids.size() - 1 ? -index : 1);
+            main.postDelayed(this, SLIDE_MS);
+        }
+    };
 
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -94,6 +106,8 @@ public class ViewerActivity extends SecureActivity {
         titles.addView(name);
         titles.addView(details);
         topBar.addView(titles, new LinearLayout.LayoutParams(0, -2, 1f));
+        playIcon = Ui.iconButton(this, R.drawable.ic_play, 0xFFFFFFFF, v -> togglePlay());
+        if (ids.size() > 1) topBar.addView(playIcon);
         counter = Ui.text(this, "", 12, 0xFF0B0B12, true);
         counter.setPadding(Ui.dp(this, 10), Ui.dp(this, 4), Ui.dp(this, 10), Ui.dp(this, 4));
         counter.setBackground(Ui.gradient(t.accent, t.accent2, Ui.dp(this, 12), GradientDrawable.Orientation.LEFT_RIGHT));
@@ -106,6 +120,9 @@ public class ViewerActivity extends SecureActivity {
         bottomBar.setPadding(Ui.dp(this, 8), Ui.dp(this, 28), Ui.dp(this, 8), Ui.dp(this, 20));
         bottomBar.setBackground(new GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, new int[]{0xDD000000, 0x00000000}));
         bottomBar.addView(action(R.drawable.ic_info, "Info", 0xFF4DABF7, v -> showInfo()));
+        View fav = action(R.drawable.ic_star_border, "Favourite", 0xFFFFD43B, v -> toggleFavourite());
+        favIcon = (ImageView) fav.getTag();
+        bottomBar.addView(fav);
         bottomBar.addView(action(R.drawable.ic_folder, "Album", 0xFFFFA94D, v -> moveToAlbum()));
         bottomBar.addView(action(R.drawable.ic_download, "Restore", 0xFF69DB7C, v -> confirmExport()));
         bottomBar.addView(action(R.drawable.ic_delete, "Delete", t.danger, v -> confirmDelete()));
@@ -125,8 +142,10 @@ public class ViewerActivity extends SecureActivity {
         bubble.addView(ic, new FrameLayout.LayoutParams(Ui.dp(this, 24), Ui.dp(this, 24), Gravity.CENTER));
         a.addView(bubble, new LinearLayout.LayoutParams(Ui.dp(this, 50), Ui.dp(this, 50)));
         TextView tv = Ui.text(this, label, 12, 0xFFEEEEEE, false);
+        tv.setMaxLines(1);
         tv.setPadding(0, Ui.dp(this, 6), 0, 0);
         a.addView(tv);
+        a.setTag(ic);   // lets the caller change the icon later (used by Favourite)
         a.setBackground(Ui.ripple(Ui.round(0x00000000, Ui.dp(this, 16)), 0x33FFFFFF));
         a.setPadding(0, Ui.dp(this, 6), 0, Ui.dp(this, 6));
         a.setOnClickListener(l);
@@ -159,6 +178,7 @@ public class ViewerActivity extends SecureActivity {
         details.setText((added > 0 ? DateFormat.format("d MMM yyyy, h:mm a", added) : "")
                 + "  ·  " + Ui.size(store.sizeOf(id)) + (album.isEmpty() ? "" : "  ·  📁 " + album));
         counter.setText((index + 1) + " / " + ids.size());
+        favIcon.setImageResource(meta.optBoolean("fav", false) ? R.drawable.ic_star : R.drawable.ic_star_border);
         spinner.setVisibility(View.VISIBLE);
 
         int maxSide = Math.max(getResources().getDisplayMetrics().widthPixels,
@@ -187,6 +207,43 @@ public class ViewerActivity extends SecureActivity {
                 main.post(() -> { spinner.setVisibility(View.GONE); toast("Could not open photo"); });
             }
         });
+    }
+
+    private void toggleFavourite() {
+        String id = ids.get(index);
+        boolean now = !store.isFavourite(id);
+        worker.execute(() -> {
+            try {
+                store.setFavourite(id, now);
+                main.post(() -> {
+                    favIcon.setImageResource(now ? R.drawable.ic_star : R.drawable.ic_star_border);
+                    favIcon.animate().scaleX(1.4f).scaleY(1.4f).setDuration(120)
+                            .withEndAction(() -> favIcon.animate().scaleX(1f).scaleY(1f).setDuration(120).start()).start();
+                    toast(now ? "★ Added to Favourites" : "Removed from Favourites");
+                });
+            } catch (Exception e) {
+                main.post(() -> toast("Could not update"));
+            }
+        });
+    }
+
+    private void togglePlay() {
+        playing = !playing;
+        playIcon.setImageResource(playing ? R.drawable.ic_pause : R.drawable.ic_play);
+        main.removeCallbacks(slide);
+        if (playing) {
+            getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            main.postDelayed(slide, SLIDE_MS);
+            toast("Slideshow started");
+        } else {
+            getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        if (playing) togglePlay();   // stop the slideshow when leaving the screen
     }
 
     private void toggleBars() {

@@ -56,6 +56,8 @@ public class VaultActivity extends SecureActivity {
     private final List<PhotoItem> all = new ArrayList<>();
     private final List<PhotoItem> shown = new ArrayList<>();
     private String album = null;                       // null = "All photos"
+    private boolean favOnly = false;                   // true = "★ Favourites" chip
+    private LinearLayout selActions;                    // bottom action bar in selection mode
     private final Set<String> selected = new LinkedHashSet<>();
     private boolean selecting = false;
     private boolean firstLoad = true;
@@ -78,6 +80,24 @@ public class VaultActivity extends SecureActivity {
         settings = new AppSettings(this);
         backup = new BackupFlow(this, t, this::load);
         setContentView(buildUi());
+        if (savedInstanceState == null) showWrongPinAlert();
+    }
+
+    /** "Intruder alert": tells the owner if wrong PINs were typed since the last visit. */
+    private void showWrongPinAlert() {
+        int unseen = settings.unseenWrongPins();
+        if (unseen <= 0) return;
+        List<Long> log = settings.wrongPinLog();
+        StringBuilder sb = new StringBuilder("Someone typed a wrong PIN " + unseen + (unseen == 1 ? " time" : " times")
+                + " since you last opened the vault.\n\n");
+        for (int i = 0; i < Math.min(unseen, log.size()) && i < 10; i++) {
+            sb.append("•  ").append(android.text.format.DateFormat.format("d MMM yyyy, h:mm:ss a", log.get(i))).append("\n");
+        }
+        sb.append("\nIf this wasn't you, consider changing your PIN.");
+        settings.markWrongPinsSeen();
+        Ui.show(Ui.dialog(this).setTitle("⚠ Wrong PIN attempts").setMessage(sb.toString())
+                .setPositiveButton("OK", null)
+                .setNeutralButton("Change PIN", (d, w) -> startActivity(new Intent(this, SettingsActivity.class))), t);
     }
 
     @Override
@@ -123,6 +143,7 @@ public class VaultActivity extends SecureActivity {
         Ui.gradientText(title, t.accent, t.accent2);
         titles.addView(title);
         normalBar.addView(titles, new LinearLayout.LayoutParams(0, -2, 1f));
+        normalBar.addView(Ui.iconButton(this, R.drawable.ic_sort, t.text, v -> pickSort()));
         normalBar.addView(Ui.iconButton(this, R.drawable.ic_lock_small, t.text, v -> { Session.lock(); goToLock(); }));
         normalBar.addView(Ui.iconButton(this, R.drawable.ic_more, t.text, v -> startActivity(new Intent(this, SettingsActivity.class))));
         header.addView(normalBar, new FrameLayout.LayoutParams(-1, -1));
@@ -137,10 +158,11 @@ public class VaultActivity extends SecureActivity {
         selCount.setMaxLines(1);
         selCount.setEllipsize(android.text.TextUtils.TruncateAt.END);
         selBar.addView(selCount, new LinearLayout.LayoutParams(0, -2, 1f));
-        selBar.addView(Ui.iconButton(this, R.drawable.ic_select_all, t.text, v -> selectAll()));
-        selBar.addView(Ui.iconButton(this, R.drawable.ic_folder, t.accent2, v -> moveSelected()));
-        selBar.addView(Ui.iconButton(this, R.drawable.ic_download, t.accent, v -> restoreSelected()));
-        selBar.addView(Ui.iconButton(this, R.drawable.ic_delete, t.danger, v -> deleteSelected()));
+        TextView allLbl = Ui.text(this, "Select all", 14, t.accent, true);
+        allLbl.setPadding(Ui.dp(this, 12), Ui.dp(this, 10), Ui.dp(this, 12), Ui.dp(this, 10));
+        allLbl.setBackground(Ui.ripple(Ui.round(0x00000000, Ui.dp(this, 16)), 0x33FFFFFF));
+        allLbl.setOnClickListener(v -> selectAll());
+        selBar.addView(allLbl);
         selBar.setVisibility(View.GONE);
         FrameLayout.LayoutParams sp = new FrameLayout.LayoutParams(-1, -1);
         sp.setMargins(Ui.dp(this, 10), Ui.dp(this, 4), Ui.dp(this, 10), Ui.dp(this, 4));
@@ -195,7 +217,48 @@ public class VaultActivity extends SecureActivity {
         FrameLayout.LayoutParams fp = new FrameLayout.LayoutParams(Ui.dp(this, 66), Ui.dp(this, 66), Gravity.BOTTOM | Gravity.END);
         fp.setMargins(0, 0, Ui.dp(this, 22), Ui.dp(this, 26));
         root.addView(fab, fp);
+
+        // ---------- bottom action bar (selection mode) ----------
+        selActions = new LinearLayout(this);
+        selActions.setGravity(Gravity.CENTER);
+        int ap = Ui.dp(this, 8);
+        selActions.setPadding(ap, ap, ap, ap);
+        GradientDrawable sab = Ui.round(t.surface, Ui.dp(this, 26));
+        sab.setStroke(Ui.dp(this, 1), Ui.alpha(t.accent, 0.3f));
+        selActions.setBackground(sab);
+        selActions.setElevation(Ui.dp(this, 12));
+        selActions.addView(action(R.drawable.ic_star, "Favourite", 0xFFFFD43B, v -> favouriteSelected()));
+        selActions.addView(action(R.drawable.ic_folder, "Album", 0xFFFFA94D, v -> moveSelected()));
+        selActions.addView(action(R.drawable.ic_download, "Restore", 0xFF69DB7C, v -> restoreSelected()));
+        selActions.addView(action(R.drawable.ic_delete, "Delete", t.danger, v -> deleteSelected()));
+        selActions.setVisibility(View.GONE);
+        FrameLayout.LayoutParams sap = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM);
+        sap.setMargins(Ui.dp(this, 14), 0, Ui.dp(this, 14), Ui.dp(this, 18));
+        root.addView(selActions, sap);
         return root;
+    }
+
+    /** Icon in a coloured bubble with a label under it. */
+    private View action(int icon, String label, int color, View.OnClickListener l) {
+        LinearLayout a = new LinearLayout(this);
+        a.setOrientation(LinearLayout.VERTICAL);
+        a.setGravity(Gravity.CENTER);
+        FrameLayout bubble = new FrameLayout(this);
+        bubble.setBackground(Ui.circle(Ui.alpha(color, 0.22f), Ui.alpha(color, 0.10f)));
+        ImageView ic = new ImageView(this);
+        ic.setImageResource(icon);
+        ic.setImageTintList(ColorStateList.valueOf(color));
+        bubble.addView(ic, new FrameLayout.LayoutParams(Ui.dp(this, 22), Ui.dp(this, 22), Gravity.CENTER));
+        a.addView(bubble, new LinearLayout.LayoutParams(Ui.dp(this, 44), Ui.dp(this, 44)));
+        TextView tv = Ui.text(this, label, 12, t.text, false);
+        tv.setMaxLines(1);
+        tv.setPadding(0, Ui.dp(this, 4), 0, 0);
+        a.addView(tv);
+        a.setBackground(Ui.ripple(Ui.round(0x00000000, Ui.dp(this, 16)), 0x33FFFFFF));
+        a.setPadding(0, Ui.dp(this, 4), 0, Ui.dp(this, 4));
+        a.setOnClickListener(l);
+        a.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1f));
+        return a;
     }
 
     private View buildStatsCard() {
@@ -284,6 +347,7 @@ public class VaultActivity extends SecureActivity {
                 for (PhotoItem p : all) ids.add(p.id);
                 selected.retainAll(ids);
                 if (album != null && !VaultStore.albums(all).containsKey(album)) album = null;
+                if (favOnly && favCount() == 0) favOnly = false;
                 rebuildChips();
                 applyFilter();
                 updateStats();
@@ -294,7 +358,12 @@ public class VaultActivity extends SecureActivity {
 
     private void applyFilter() {
         shown.clear();
-        for (PhotoItem p : all) if (album == null || album.equalsIgnoreCase(p.album)) shown.add(p);
+        for (PhotoItem p : all) {
+            if (favOnly && !p.favourite) continue;
+            if (album != null && !album.equalsIgnoreCase(p.album)) continue;
+            shown.add(p);
+        }
+        VaultStore.sort(shown, settings.sortMode());
         adapter.notifyDataSetChanged();
         emptyView.setVisibility(all.isEmpty() ? View.VISIBLE : View.GONE);
     }
@@ -324,12 +393,91 @@ public class VaultActivity extends SecureActivity {
 
     private void rebuildChips() {
         chipRow.removeAllViews();
-        chipRow.addView(chip("All  " + all.size(), 0, album == null, () -> { album = null; rebuildChips(); applyFilter(); }));
+        chipRow.addView(chip("All  " + all.size(), 0, album == null && !favOnly,
+                () -> { album = null; favOnly = false; rebuildChips(); applyFilter(); }));
+        int favs = favCount();
+        if (favs > 0) {
+            chipRow.addView(chip("★  Favourites  " + favs, 0, favOnly,
+                    () -> { favOnly = true; album = null; rebuildChips(); applyFilter(); }));
+        }
         for (Map.Entry<String, Integer> e : VaultStore.albums(all).entrySet()) {
             String name = e.getKey();
-            chipRow.addView(chip(name + "  " + e.getValue(), AppTheme.albumColor(name), name.equalsIgnoreCase(album),
-                    () -> { album = name; rebuildChips(); applyFilter(); }));
+            TextView c = chip(name + "  " + e.getValue(), AppTheme.albumColor(name), !favOnly && name.equalsIgnoreCase(album),
+                    () -> { album = name; favOnly = false; rebuildChips(); applyFilter(); });
+            c.setOnLongClickListener(v -> { manageAlbum(name); return true; });   // long-press = rename / delete
+            chipRow.addView(c);
         }
+    }
+
+    private int favCount() {
+        int n = 0;
+        for (PhotoItem p : all) if (p.favourite) n++;
+        return n;
+    }
+
+    private void pickSort() {
+        String[] labels = {"Newest first", "Oldest first", "Name (A–Z)", "Largest first"};
+        Ui.show(Ui.dialog(this)
+                .setTitle("Sort photos")
+                .setSingleChoiceItems(labels, settings.sortMode(), (d, which) -> {
+                    settings.setSortMode(which);
+                    applyFilter();
+                    d.dismiss();
+                })
+                .setNegativeButton("Cancel", null), t);
+    }
+
+    /** Long-press an album chip: rename it or delete it (photos are kept). */
+    private void manageAlbum(String name) {
+        Ui.show(Ui.dialog(this)
+                .setTitle("📁  " + name)
+                .setItems(new String[]{"✏️  Rename album", "🗑  Delete album (photos stay in the vault)"}, (d, which) -> {
+                    if (which == 0) renameAlbumDialog(name);
+                    else Ui.show(Ui.dialog(this)
+                            .setTitle("Delete album “" + name + "”?")
+                            .setMessage("Only the album is removed. All its photos stay in the vault under “All”.")
+                            .setNegativeButton("Cancel", null)
+                            .setPositiveButton("Delete album", (d2, w2) -> runAlbumRename(name, "")), t);
+                })
+                .setNegativeButton("Close", null), t);
+    }
+
+    private void renameAlbumDialog(String old) {
+        LinearLayout box = new LinearLayout(this);
+        int pad = Ui.dp(this, 22);
+        box.setPadding(pad, pad / 2, pad, 0);
+        android.widget.EditText e = new android.widget.EditText(this);
+        e.setText(old);
+        e.setSelection(old.length());
+        e.setSingleLine(true);
+        e.setTextColor(t.text);
+        e.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_FLAG_CAP_WORDS);
+        box.addView(e, new LinearLayout.LayoutParams(-1, -2));
+        Ui.show(Ui.dialog(this)
+                .setTitle("Rename album")
+                .setView(box)
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Rename", (d, w) -> {
+                    String n = e.getText().toString().trim();
+                    if (n.isEmpty()) { toast("Please type a name"); return; }
+                    if (n.length() > 30) n = n.substring(0, 30);
+                    runAlbumRename(old, n);
+                }), t);
+    }
+
+    private void runAlbumRename(String old, String newName) {
+        worker.execute(() -> {
+            try {
+                int n = store.renameAlbum(old, newName);
+                main.post(() -> {
+                    if (old.equalsIgnoreCase(album)) album = newName.isEmpty() ? null : newName;
+                    load();
+                    toast(newName.isEmpty() ? "Album deleted (" + n + " photos kept)" : "Renamed to " + newName);
+                });
+            } catch (Exception ex) {
+                main.post(() -> toast("Could not change album"));
+            }
+        });
     }
 
     private TextView chip(String label, int dotColor, boolean active, Runnable onTap) {
@@ -369,6 +517,9 @@ public class VaultActivity extends SecureActivity {
         selBar.setAlpha(0f);
         selBar.animate().alpha(1f).setDuration(150).start();
         fab.animate().scaleX(0f).scaleY(0f).setDuration(150).start();
+        selActions.setVisibility(View.VISIBLE);
+        selActions.setTranslationY(Ui.dp(this, 120));
+        selActions.animate().translationY(0).setDuration(200).start();
         updateSelBar();
     }
 
@@ -377,8 +528,27 @@ public class VaultActivity extends SecureActivity {
         selected.clear();
         selBar.setVisibility(View.GONE);
         normalBar.setVisibility(View.VISIBLE);
+        selActions.setVisibility(View.GONE);
         fab.animate().scaleX(1f).scaleY(1f).setDuration(150).start();
         adapter.notifyDataSetChanged();
+    }
+
+    /** Stars all selected photos; if they are ALL starred already, removes the star instead. */
+    private void favouriteSelected() {
+        List<String> ids = new ArrayList<>(selected);
+        boolean allFav = true;
+        for (PhotoItem p : all) if (selected.contains(p.id) && !p.favourite) { allFav = false; break; }
+        boolean makeFav = !allFav;
+        worker.execute(() -> {
+            for (String id : ids) {
+                try { store.setFavourite(id, makeFav); } catch (Exception ignored) { }
+            }
+            main.post(() -> {
+                exitSelect();
+                load();
+                toast(makeFav ? "★ Added to Favourites" : "Removed from Favourites");
+            });
+        });
     }
 
     private void toggle(String id) {
@@ -530,7 +700,7 @@ public class VaultActivity extends SecureActivity {
     // =================================================================== grid adapter
 
     private static class Holder {
-        ImageView img, check;
+        ImageView img, check, star;
         View dim;
         String id;
     }
@@ -566,6 +736,16 @@ public class VaultActivity extends SecureActivity {
                 int pad = Ui.dp(VaultActivity.this, 3);
                 h.check.setPadding(pad, pad, pad, pad);
                 cell.addView(h.check, cp);
+                h.star = new ImageView(VaultActivity.this);
+                h.star.setImageResource(R.drawable.ic_star);
+                h.star.setImageTintList(ColorStateList.valueOf(0xFFFFD43B));
+                h.star.setBackground(Ui.circle(0x88000000, 0x88000000));
+                int sp2 = Ui.dp(VaultActivity.this, 4);
+                h.star.setPadding(sp2, sp2, sp2, sp2);
+                FrameLayout.LayoutParams stp = new FrameLayout.LayoutParams(Ui.dp(VaultActivity.this, 22),
+                        Ui.dp(VaultActivity.this, 22), Gravity.BOTTOM | Gravity.START);
+                stp.setMargins(m, m, m, m);
+                cell.addView(h.star, stp);
                 cell.setTag(h);
             } else {
                 h = (Holder) cell.getTag();
@@ -574,6 +754,7 @@ public class VaultActivity extends SecureActivity {
             cell.setLayoutParams(new AbsListView.LayoutParams(side, side));
 
             String id = shown.get(pos).id;
+            h.star.setVisibility(shown.get(pos).favourite ? View.VISIBLE : View.GONE);
             boolean isSel = selected.contains(id);
             h.dim.setVisibility(isSel ? View.VISIBLE : View.GONE);
             h.check.setVisibility(selecting ? View.VISIBLE : View.GONE);

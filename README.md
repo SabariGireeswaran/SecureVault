@@ -10,7 +10,14 @@ An **offline**, encrypted photo vault for Android, written in **Java** using onl
 - **Multi-select** (long-press): delete, move to album, or restore many photos at once
 - Full-screen viewer: **swipe** between photos, pinch/double-tap zoom, photo details
 - **Dashboard**: photo count, storage used, backup reminder
+- **★ Favourites**, **sort** (newest / oldest / name / largest), **slideshow**
+- **Album manager**: long-press an album chip to rename or delete it
+- **Wrong-PIN alert**: after unlocking, see when someone typed a wrong PIN (+ full history in Settings)
+- **Disguise mode**: home-screen icon and name become “Calculator”
+- **Auto-lock timer**: instantly, 30 seconds, or 1 minute (screen-off always locks instantly)
 - **Auto-erase** (optional): destroy the vault after 10 or 20 wrong PINs in a row
+
+📘 **New to the code? Read [docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md)** — setup, how it works, how to add features, interview notes.
 - **Encrypted backup file** for pendrive / laptop, restorable on any phone
 
 ## How the security works
@@ -91,6 +98,7 @@ app/src/main/java/com/sabari/photovault/
     ├── SettingsActivity.java  # theme, security, backup, about
     ├── BackupFlow.java        # backup/restore screens (shared)
     ├── AlbumPicker.java       # "move to album" dialog
+    ├── Disguise.java          # switch launcher icon (SecureVault / Calculator)
     └── ZoomImageView.java     # pinch-zoom + swipe
 tools/
 └── SvbExtract.java            # open a backup on a laptop

@@ -378,6 +378,7 @@ public class LockActivity extends SecureActivity {
                 main.post(this::openVault);
             } catch (VaultKeys.WrongPinException e) {
                 keys.recordFailure();
+                settings.logWrongPin(System.currentTimeMillis());   // for the "someone tried your PIN" alert
                 int limit = settings.wipeAfter();
                 boolean erase = limit > 0 && keys.failedAttempts() >= limit;
                 if (erase) VaultWiper.wipe(this);

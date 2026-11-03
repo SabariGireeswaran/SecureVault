@@ -61,11 +61,26 @@ public class VaultStore {
                 String id = f.getName().substring(0, f.getName().length() - 4);
                 JSONObject m = loadMeta(id);
                 items.add(new PhotoItem(id, m.optLong("added", f.lastModified()),
-                        m.optString("album", ""), m.optString("name", "photo"), f.length()));
+                        m.optString("album", ""), m.optString("name", "photo"), f.length(),
+                        m.optBoolean("fav", false)));
             }
         }
         Collections.sort(items, (a, b) -> Long.compare(b.addedAt, a.addedAt));
         return items;
+    }
+
+    /** Sorts a list in place. Uses the AppSettings.SORT_... constants. */
+    public static void sort(List<PhotoItem> items, int mode) {
+        switch (mode) {
+            case AppSettings.SORT_OLDEST:
+                Collections.sort(items, (a, b) -> Long.compare(a.addedAt, b.addedAt)); break;
+            case AppSettings.SORT_NAME:
+                Collections.sort(items, (a, b) -> a.name.compareToIgnoreCase(b.name)); break;
+            case AppSettings.SORT_LARGEST:
+                Collections.sort(items, (a, b) -> Long.compare(b.sizeBytes, a.sizeBytes)); break;
+            default:
+                Collections.sort(items, (a, b) -> Long.compare(b.addedAt, a.addedAt));
+        }
     }
 
     /** Album name -> number of photos, sorted A-Z. */
@@ -106,10 +121,32 @@ public class VaultStore {
 
     /** Moves a photo into an album ("" = remove from album). */
     public void setAlbum(String id, String album) throws IOException, GeneralSecurityException {
+        updateMeta(id, "album", album == null ? "" : album.trim());
+    }
+
+    public void setFavourite(String id, boolean fav) throws IOException, GeneralSecurityException {
+        updateMeta(id, "fav", fav);
+    }
+
+    public boolean isFavourite(String id) {
+        return loadMeta(id).optBoolean("fav", false);
+    }
+
+    /** Renames an album on every photo inside it. newName "" = delete the album (photos stay). */
+    public int renameAlbum(String oldName, String newName) throws IOException, GeneralSecurityException {
+        int n = 0;
+        for (PhotoItem p : list()) {
+            if (p.album.equalsIgnoreCase(oldName)) { setAlbum(p.id, newName); n++; }
+        }
+        return n;
+    }
+
+    /** Changes one field in a photo's encrypted details file. */
+    private void updateMeta(String id, String key, Object value) throws IOException, GeneralSecurityException {
         JSONObject m;
         try {
             m = new JSONObject(loadMeta(id).toString());   // copy, so the cache only changes after saving
-            m.put("album", album == null ? "" : album.trim());
+            m.put(key, value);
         } catch (JSONException e) {
             throw new IOException("Bad photo details");
         }

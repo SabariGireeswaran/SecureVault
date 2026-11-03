@@ -7,12 +7,14 @@ public class PhotoItem {
     public final String album;   // "" = not in any album
     public final String name;
     public final long sizeBytes;
+    public final boolean favourite;
 
-    public PhotoItem(String id, long addedAt, String album, String name, long sizeBytes) {
+    public PhotoItem(String id, long addedAt, String album, String name, long sizeBytes, boolean favourite) {
         this.id = id;
         this.addedAt = addedAt;
         this.album = album;
         this.name = name;
         this.sizeBytes = sizeBytes;
+        this.favourite = favourite;
     }
 }

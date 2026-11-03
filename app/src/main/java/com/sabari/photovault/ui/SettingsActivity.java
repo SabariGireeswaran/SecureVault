@@ -38,7 +38,8 @@ public class SettingsActivity extends SecureActivity {
     private AppSettings settings;
     private BackupFlow backup;
     private Switch bioSwitch;
-    private TextView wipeValue, backupSub;
+    private TextView wipeValue, backupSub, autoLockValue, historySub;
+    private Switch disguiseSwitch;
     private boolean ignoreSwitch = false;
 
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
@@ -116,9 +117,26 @@ public class SettingsActivity extends SecureActivity {
         wipeValue = Ui.text(this, "", 14, t.accent, true);
         sec.addView(row(R.drawable.ic_delete, t.danger, "Auto-erase", "Erase vault after too many wrong PINs", wipeValue, v -> pickWipe()));
         sec.addView(divider());
-        sec.addView(row(R.drawable.ic_lock_small, 0xFFFFD43B, "Lock now", "Close the vault immediately", null,
+        autoLockValue = Ui.text(this, "", 14, t.accent, true);
+        sec.addView(row(R.drawable.ic_lock_small, 0xFFFFD43B, "Auto-lock", "When to lock after you leave the app", autoLockValue, v -> pickAutoLock()));
+        sec.addView(divider());
+        historySub = Ui.text(this, "", 13, t.muted, false);
+        sec.addView(row(R.drawable.ic_history, 0xFFFF6B6B, "Wrong-PIN history", null, null, v -> showHistory(), historySub));
+        sec.addView(divider());
+        sec.addView(row(R.drawable.ic_lock_small, 0xFF4DABF7, "Lock now", "Close the vault immediately", null,
                 v -> { Session.lock(); goToLock(); }));
         col.addView(sec);
+
+        // ---------- Privacy ----------
+        col.addView(sectionLabel("PRIVACY"));
+        LinearLayout pv = card();
+        disguiseSwitch = new Switch(this);
+        disguiseSwitch.setThumbTintList(ColorStateList.valueOf(t.accent));
+        disguiseSwitch.setTrackTintList(ColorStateList.valueOf(Ui.alpha(t.accent, 0.4f)));
+        disguiseSwitch.setOnCheckedChangeListener((b, on) -> { if (!ignoreSwitch) toggleDisguise(on); });
+        pv.addView(row(R.drawable.ic_calculate, 0xFFFFA94D, "Disguise as Calculator",
+                "Home-screen icon and name become “Calculator”", disguiseSwitch, null));
+        col.addView(pv);
 
         // ---------- Backup ----------
         col.addView(sectionLabel("BACKUP"));
@@ -136,7 +154,7 @@ public class SettingsActivity extends SecureActivity {
         LinearLayout ab = card();
         ab.addView(row(R.drawable.ic_info, 0xFFFFA94D, "How my photos are protected", "Simple explanation", null, v -> about()));
         ab.addView(divider());
-        ab.addView(row(R.drawable.ic_shield, 0xFF38D9A9, "SecureVault 1.2.1", "Offline · No internet permission · Open source", null, null));
+        ab.addView(row(R.drawable.ic_shield, 0xFF38D9A9, "SecureVault 1.3", "Offline · No internet permission · Open source", null, null));
         col.addView(ab);
         return page;
     }
@@ -147,10 +165,67 @@ public class SettingsActivity extends SecureActivity {
             bioSwitch.setChecked(keys.isBioEnabled());
             ignoreSwitch = false;
         }
+        ignoreSwitch = true;
+        disguiseSwitch.setChecked(settings.disguised());
+        ignoreSwitch = false;
         int w = settings.wipeAfter();
         wipeValue.setText(w == 0 ? "Off" : w + " tries");
+        int al = settings.autoLockSeconds();
+        autoLockValue.setText(al == 0 ? "Instantly" : al < 60 ? al + " sec" : (al / 60) + " min");
+        int n = settings.wrongPinLog().size();
+        historySub.setText(n == 0 ? "No wrong PINs recorded" : n + " wrong PIN" + (n == 1 ? "" : "s") + " recorded");
         long last = settings.lastBackup();
         backupSub.setText(last == 0 ? "No backup yet" : "Last backup " + Ui.ago(last));
+    }
+
+    private void toggleDisguise(boolean on) {
+        if (!on) {
+            Disguise.set(this, false);
+            toast("Icon changed back to SecureVault");
+            return;
+        }
+        Ui.show(Ui.dialog(this)
+                .setTitle("Disguise as Calculator?")
+                .setMessage("The home-screen icon will change to a Calculator icon named “Calculator”. "
+                        + "Opening it still shows your PIN screen.\n\n"
+                        + "• Your launcher may take a few seconds to update.\n"
+                        + "• If you had the icon on your home screen, add the new “Calculator” icon again from the app drawer.\n"
+                        + "• Turn this off here any time.")
+                .setCancelable(false)
+                .setNegativeButton("Cancel", (d, w) -> refresh())
+                .setPositiveButton("Disguise", (d, w) -> {
+                    Disguise.set(this, true);
+                    toast("Now shown as “Calculator”");
+                }), t);
+    }
+
+    private void pickAutoLock() {
+        String[] labels = {"Instantly (most secure)", "After 30 seconds", "After 1 minute"};
+        int[] values = {0, 30, 60};
+        int cur = settings.autoLockSeconds() == 30 ? 1 : settings.autoLockSeconds() == 60 ? 2 : 0;
+        Ui.show(Ui.dialog(this)
+                .setTitle("Auto-lock")
+                .setSingleChoiceItems(labels, cur, (d, which) -> {
+                    settings.setAutoLockSeconds(values[which]);
+                    refresh();
+                    d.dismiss();
+                })
+                .setNegativeButton("Cancel", null), t);
+    }
+
+    private void showHistory() {
+        java.util.List<Long> log = settings.wrongPinLog();
+        if (log.isEmpty()) {
+            Ui.show(Ui.dialog(this).setTitle("Wrong-PIN history")
+                    .setMessage("✅ No wrong PINs have been entered.").setPositiveButton("OK", null), t);
+            return;
+        }
+        StringBuilder sb = new StringBuilder("Times a wrong PIN was typed (newest first):\n\n");
+        for (long time : log) sb.append("•  ").append(android.text.format.DateFormat.format("d MMM yyyy, h:mm:ss a", time)).append("\n");
+        Ui.show(Ui.dialog(this).setTitle("Wrong-PIN history")
+                .setMessage(sb.toString())
+                .setPositiveButton("OK", null)
+                .setNeutralButton("Clear", (d, w) -> { settings.clearWrongPinLog(); refresh(); }), t);
     }
 
     // =================================================================== actions
