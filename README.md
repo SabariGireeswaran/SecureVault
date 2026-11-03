@@ -1,0 +1,85 @@
+# SecureVault — Private Photo Vault for Android
+
+An **offline**, encrypted photo vault for Android, written in **Java** using only built-in Android APIs (no third-party libraries).
+
+## Features
+- Unlock with **PIN + fingerprint**
+- Hide photos from the gallery (optionally deletes the original after encrypting)
+- Grid view, full-screen viewer with pinch-zoom
+- Restore a photo back to the gallery, or delete it permanently
+
+## How the security works
+
+| Threat | Protection |
+|---|---|
+| Someone opens the app | PIN (6–16 digits) or fingerprint required |
+| Someone guesses PINs | After 5 wrong tries: wait 30s, 1m, 2m … up to 1 hour per try. PBKDF2 (210,000 rounds) makes every guess slow |
+| Someone copies the files to a PC | Files are AES-256-GCM encrypted, and the key is also bound to the phone's security chip (Android Keystore / StrongBox). Useless off this phone |
+| The app leaks photos online | **No INTERNET permission** — the app cannot send anything |
+| Screenshots / screen recording / recent-apps preview | Blocked with `FLAG_SECURE` |
+| Cloud / Google backup | Disabled (`allowBackup=false` + data-extraction rules) |
+| Phone left unlocked | Vault locks the moment you leave the app or the screen turns off |
+| New fingerprint added by someone | Fingerprint key is destroyed automatically; PIN required |
+| Debug access (`adb run-as`) | Release build is not debuggable |
+
+### Key chain
+```
+photos  ──encrypted by──▶  MASTER KEY (random AES-256)
+MASTER KEY copy A  ──▶ AES-GCM(PBKDF2(PIN))  ──▶ wrapped again by hardware DEVICE key
+MASTER KEY copy B  ──▶ hardware BIOMETRIC key (needs a fresh fingerprint for every use)
+```
+The PIN is **never stored**. A wrong PIN simply fails to decrypt.
+
+⚠️ **There is no "forgot PIN".** Forget it and the photos are gone forever. Uninstalling the app also deletes them.
+
+## Project structure
+```
+app/src/main/java/com/sabari/photovault/
+├── VaultApp.java              # auto-lock when the app leaves the screen
+├── crypto/
+│   ├── CryptoManager.java     # AES-256-GCM, PBKDF2
+│   ├── KeyStoreHelper.java    # hardware keys (device + fingerprint)
+│   ├── VaultKeys.java         # PIN / fingerprint wrapping, lockout
+│   └── Session.java           # master key in RAM while unlocked
+├── data/
+│   ├── VaultStore.java        # encrypted file storage, import, export
+│   ├── BitmapUtils.java       # decode in memory, thumbnails, EXIF rotation
+│   └── PhotoItem.java
+└── ui/
+    ├── SecureActivity.java    # base class: FLAG_SECURE + lock check
+    ├── LockActivity.java      # create PIN / unlock
+    ├── Fingerprint.java       # BiometricPrompt wrapper
+    ├── VaultActivity.java     # photo grid + settings menu
+    ├── ViewerActivity.java    # full-screen viewer
+    └── ZoomImageView.java     # pinch-zoom
+```
+
+## Build (Ubuntu)
+Requirements: JDK 17+, Android SDK (platform 34, build-tools 34).
+
+```bash
+git clone https://github.com/SabariGireeswaran/securevault.git
+cd securevault
+echo "sdk.dir=$HOME/Android/Sdk" > local.properties
+```
+
+Create your own signing key (keep it private — you need the same key for every future update):
+```bash
+keytool -genkeypair -v -keystore app/vault-release.jks -alias vault \
+  -keyalg RSA -keysize 4096 -validity 10000
+```
+Create `keystore.properties` in the project root:
+```
+storeFile=vault-release.jks
+storePassword=YOUR_PASSWORD
+keyAlias=vault
+keyPassword=YOUR_PASSWORD
+```
+Build and install:
+```bash
+./gradlew assembleRelease
+adb install app/build/outputs/apk/release/app-release.apk
+```
+`keystore.properties` and `*.jks` are in `.gitignore` and must never be committed.
+
+Requires Android 11 or newer.
